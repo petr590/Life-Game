@@ -1,0 +1,64 @@
+# depslib dependency file v1.0
+1677185112 source:/home/winch/0x590/c++/Life-game/src/life_game.cpp
+	"life_game.h"
+
+1677189378 /home/winch/0x590/c++/Life-game/include/life_game.h
+	<vector>
+	<functional>
+	<chrono>
+	<thread>
+	<iostream>
+	<cmath>
+	"cell.h"
+	"rules.h"
+	"check_zone.h"
+	"util.h"
+
+1677178830 source:/home/winch/0x590/c++/Life-game/main.cpp
+	"life_game.h"
+	<iostream>
+
+1677184291 /home/winch/0x590/c++/Life-game/include/cell.h
+	<SFML/Graphics.hpp>
+
+1677184388 source:/home/winch/0x590/c++/Life-game/src/cell.cpp
+	"cell.h"
+
+1677173393 /home/winch/0x590/c++/Life-game/include/util.h
+	<cstddef>
+	<string>
+	<iostream>
+	<SFML/Graphics.hpp>
+	"font_load_exception.h"
+
+1677173066 source:/home/winch/0x590/c++/Life-game/src/util.cpp
+	"util.h"
+
+1677173474 source:/home/winch/0x590/c++/Life-game/src/rules.cpp
+	"rules.h"
+
+1677173429 /home/winch/0x590/c++/Life-game/include/rules.h
+	<type_traits>
+	<string>
+	"rule.h"
+	"cell.h"
+
+1677173508 /home/winch/0x590/c++/Life-game/include/rule.h
+	<type_traits>
+
+1677168719 /home/winch/0x590/c++/Life-game/include/check_zone.h
+	<string>
+	"cell.h"
+
+1677173543 source:/home/winch/0x590/c++/Life-game/src/rule.cpp
+	"rule.h"
+
+1677168896 source:/home/winch/0x590/c++/Life-game/src/check_zone.cpp
+	"check_zone.h"
+
+1677170774 source:/home/winch/0x590/c++/Life-game/src/font_load_exception.cpp
+	"font_load_exception.h"
+
+1677170844 /home/winch/0x590/c++/Life-game/include/font_load_exception.h
+	<stdexcept>
+
