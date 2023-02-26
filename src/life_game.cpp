@@ -18,7 +18,8 @@ namespace lifegame {
     };
 
     LifeGame::LifeGame(VideoMode videoMode, bool fullscreen, string defaultFontName):
-            width(widthOf(videoMode.width)), height(heightOf(videoMode.height)),
+            dataWidth(widthOf(videoMode.width)), dataHeight(heightOf(videoMode.height)),
+            width(dataWidth), height(dataHeight),
             data(new_2d_array<Cell>(width + 2, height + 2, 1, CELL_OFF)), // Резервируем область шириной в 1 клетку вокруг поля
             window(videoMode, TITLE, fullscreen ? Style::Fullscreen : Style::Default),
             fullscreen(fullscreen),
@@ -27,12 +28,29 @@ namespace lifegame {
             pausedText(defaultText(14)),
             rulesText(defaultText(27)),
             checkZoneText(defaultText(23)),
-            speedText(defaultText(10)) {
+            speedText(defaultText(12)),
+            scaleText(defaultText(10)),
+            helpElement(Vector2f(window.getSize()), Vector2f(270.f / 16 * CELL_SIZE, 300.f / 16 * CELL_SIZE), {
+                    defaultText(0, 0, "F1 - this help"),
+                    defaultText(0, 0, "P - pause"),
+                    defaultText(0, 0, "Esc - exit"),
+                    defaultText(0, 0, "F11 - enter/exit fullscreen"),
+                    defaultText(0, 0, "C - clear screen"),
+                    defaultText(0, 0, "F - fill screen"),
+                    defaultText(0, 0, "R - fill screen randomly"),
+                    defaultText(0, 0, "1, 2, 3, 4 - change rules"),
+                    defaultText(0, 0, "Z - change check zone"),
+                    defaultText(0, 0, "LMB - draw"),
+                    defaultText(0, 0, "RMB - erase"),
+                    defaultText(0, 0, "Wheel up - increase speed"),
+                    defaultText(0, 0, "Wheel down - reduce speed"),
+            }) {
 
         setPause(true);
         setRules(&RULES[0]);
         setCheckZone(&CheckZone::QUAD);
         setDelay(64ms);
+        setScale(DEFAULT_CELL_SIZE);
     }
 
     LifeGame::~LifeGame() {
@@ -47,15 +65,58 @@ namespace lifegame {
         return (height - TOOLBAR_HEIGHT) / CELL_SIZE;
     }
 
-    Text LifeGame::defaultText(int charsWidth) {
-        Text text("", defaultTextFont, CHAR_WIDTH);
-        text.setPosition(textXOffset, height * CELL_SIZE - TOOLBAR_TEXT_OFFSET);
+    Text LifeGame::defaultText(int x, int y, string content) {
+        Text text(content, defaultTextFont, CHAR_WIDTH);
+        text.setPosition(x, y);
         text.setFillColor(Color::White);
-
-        textXOffset += charsWidth * CHAR_WIDTH / 2;
 
         return text;
     }
+
+    Text LifeGame::defaultText(int charsWidth) {
+        Text text = defaultText(textXOffset, height * CELL_SIZE - TOOLBAR_TEXT_OFFSET);
+        textXOffset += charsWidth * CHAR_WIDTH / 2;
+        return text;
+    }
+
+
+    LifeGame::HelpElement::HelpElement(Vector2f windowSize, Vector2f size, initializer_list<Text> texts):
+            frame(size), texts(texts) {
+
+        Vector2f position = (windowSize - size) / 2.f;
+
+        frame.setPosition(position);
+        frame.setFillColor(Color::Black);
+        frame.setOutlineColor(Color::White);
+        frame.setOutlineThickness(2);
+
+        position.x += CELL_SIZE * 1.25f;
+        position.y += CELL_SIZE;
+
+        for(sf::Text& text : this->texts) {
+            text.setPosition(position);
+            position.y += CELL_SIZE * 1.25f;
+        }
+    }
+
+    void LifeGame::HelpElement::hide() {
+        hidden = true;
+    }
+
+    void LifeGame::HelpElement::toggleHidden() {
+        hidden = !hidden;
+    }
+
+    bool LifeGame::HelpElement::isHidden() const {
+        return hidden;
+    }
+
+    void LifeGame::HelpElement::draw(RenderTarget& target, RenderStates states) const {
+        target.draw(frame);
+        for(Text text : texts)
+            target.draw(text);
+    }
+
 
     void LifeGame::setPause(bool paused) {
         this->paused = paused;
@@ -77,8 +138,26 @@ namespace lifegame {
         speedText.setString("speed: " + to_string(MAX_DELAY.count() / this->delay.count()));
     }
 
-    void LifeGame::incDelay(int steps) {
-        setDelay(duration_cast<milliseconds>(delay * pow(2, steps)));
+    void LifeGame::setScale(int scale) {
+        scale = min(max(scale, MIN_CELL_SIZE), MAX_CELL_SIZE);
+
+        float multiplier = (float)scale / CELL_SIZE;
+
+        width /= multiplier;
+        height /= multiplier;
+        extendDataIfNecessary();
+
+        CELL_SIZE = scale;
+        Vector2f newCellSize(CELL_SIZE - 1, CELL_SIZE - 1);
+        Cell::whiteCellShape.setSize(newCellSize);
+        Cell::blackCellShape.setSize(newCellSize);
+
+        scaleText.setString("scale: " + fp_to_string((float)CELL_SIZE / DEFAULT_CELL_SIZE));
+    }
+
+    void LifeGame::incScale(int extent) {
+        float multiplier = pow(2, extent);
+        setScale(CELL_SIZE * multiplier);
     }
 
 
@@ -95,6 +174,94 @@ namespace lifegame {
             for(int y = startY; y < endY; ++y) {
                 func(x, y, row[y]);
             }
+        }
+    }
+
+    #ifdef DRAW_PARALLEL
+    void LifeGame::forEachCellParallel(function<void(int, int, Cell&)> parallelFunc, function<void(int, int, Cell&)> func) {
+        unsigned int processorsCount = thread::hardware_concurrency();
+
+        cout << "processorsCount = " << processorsCount << endl;
+        getchar();
+
+        if(processorsCount > 1) {
+            unsigned int threadsCount = processorsCount - 1;
+
+            //vector<thread*> threads;
+            vector<future<void>> futures;
+            futures.reserve(threadsCount);
+
+            int partWidth = width / processorsCount,
+                height = this->height;
+
+            for(unsigned int i = 0; i < threadsCount; ++i) {
+                cout << "new thread" << endl;
+                getchar();
+
+                /*
+                threads.push_back(new thread([this, i, partWidth, height, &parallelFunc] () {
+                    forEachCell(i * partWidth, 0, (i + 1) * partWidth, height, parallelFunc);
+                }));
+                //*/
+
+                futures.push_back(async(launch::async, [this, i, partWidth, height, &parallelFunc] () {
+                    try {
+                        forEachCell(i * partWidth, 0, (i + 1) * partWidth, height, parallelFunc);
+                    } catch(std::exception& ex) {
+                        cout << ex.what() << endl;
+                        getchar();
+                        throw;
+                    }
+                }));
+            }
+
+            cout << "threads started" << endl;
+            getchar();
+
+            forEachCell(threadsCount * partWidth, 0, processorsCount * partWidth, height, func);
+
+            /*
+            for(thread* thrd : threads) {
+                //cout << "join thread" << endl;
+                //getchar();
+
+                thrd->join();
+                delete thrd;
+            }
+            //*/
+
+            for(future<void>& fut : futures) {
+                fut.wait();
+            }
+
+            cout << "threads joined" << endl;
+            getchar();
+
+        } else {
+            forEachCell(func);
+        }
+    }
+    #endif // DRAW_PARALLEL
+
+    void LifeGame::extendDataIfNecessary() {
+        if(width > dataWidth || height > dataHeight) {
+            Cell
+                *const *const oldData = this->data,
+                *const *const newData = new_2d_array<Cell>(width + 2, height + 2, 1, CELL_OFF);
+
+            for(int x = 0, dataWidth = this->dataWidth; x < dataWidth; ++x) {
+                Cell
+                    *const oldRow = oldData[x],
+                    *const newRow = newData[x];
+
+                for(int y = 0, dataHeight = this->dataHeight; y < dataHeight; ++y) {
+                    newRow[y] = oldRow[y];
+                }
+            }
+
+            data = newData;
+            dataWidth = width;
+            dataHeight = height;
         }
     }
 
@@ -120,7 +287,7 @@ namespace lifegame {
 
     void LifeGame::fillRandom() {
         forEachCell([] (int x, int y, Cell& cell) {
-            cell = rand() * x * y / 2 & CELL_ON;
+            cell = (rand() * x * y / 2) & CELL_ON;
         });
     }
 
@@ -130,136 +297,179 @@ namespace lifegame {
         });
     }
 
-    bool LifeGame::processEvent() {
-        Event event;
+    void LifeGame::fill() {
+        forEachCell([] (int x, int y, Cell& cell) {
+            cell.on();
+        });
+    }
 
-        bool eventProcessed = false;
+    bool LifeGame::processEvent(Event& event) {
+        switch(event.type) {
+            case Event::Closed:
+                window.close();
+                return false;
 
-        while(window.pollEvent(event)) {
+            case Event::Resized:
+                window.setView(View(FloatRect(0, 0, event.size.width, event.size.height)));
+                width = widthOf(event.size.width);
+                height = heightOf(event.size.height);
 
-            switch(event.type) {
-                case Event::Closed:
-                    window.close();
-                    break;
+                for(Text* text : texts) {
+                    text->setPosition(text->getPosition().x, event.size.height - TOOLBAR_TEXT_OFFSET);
+                }
 
-                case Event::Resized:
-                    window.setView(View(FloatRect(0, 0, event.size.width, event.size.height)));
-                    width = widthOf(event.size.width);
-                    height = heightOf(event.size.height);
+                break;
 
-                    for(sf::Text* text : texts) {
-                        text->setPosition(text->getPosition().x, event.size.height - TOOLBAR_TEXT_OFFSET);
+            case Event::KeyPressed:
+
+                switch(event.key.code) {
+                    case Keyboard::Escape:
+
+                        if(!helpElement.isHidden()) {
+                            helpElement.hide();
+                        } else {
+                            window.close();
+                            return false;
+                        }
+
+                        break;
+
+                    case Keyboard::F1:
+                        helpElement.toggleHidden();
+                        break;
+
+                    case Keyboard::F2:
+                        break;
+
+                    case Keyboard::F11: {
+                        Vector2u size = window.getSize();
+                        window.create(VideoMode(size.x, size.y), TITLE, fullscreen ? Style::Default : Style::Fullscreen);
+                        fullscreen = !fullscreen;
+                        break;
                     }
 
-                    drawAll();
+                    case Keyboard::R:
+                        fillRandom();
+                        break;
 
-                    break;
+                    case Keyboard::C:
+                        clear();
+                        break;
 
-                case Event::KeyPressed:
+                    case Keyboard::F:
+                        fill();
+                        break;
 
-                    switch(event.key.code) {
-                        case Keyboard::Escape:
-                            window.close();
-                            break;
+                    case Keyboard::Space:
+                        setPause(!paused);
 
-                        case Keyboard::F11: {
-                            Vector2u size = window.getSize();
-                            window.create(VideoMode(size.x, size.y), TITLE, fullscreen ? Style::Default : Style::Fullscreen);
-                            drawAll();
-                            fullscreen = !fullscreen;
+                        if(!paused) { // reset time point
+                            timePoint = system_clock::now();
+                        }
+
+                        break;
+
+                    case Keyboard::Z:
+                        setCheckZone(CheckZone::checkZones[checkZoneIndex = (checkZoneIndex + 1) % CheckZone::checkZones.size()]);
+                        break;
+
+                    case Keyboard::Up:
+                        setDelay(delay / 2);
+                        break;
+
+                    case Keyboard::Down:
+                        setDelay(delay * 2);
+                        break;
+
+                    default:
+
+                        if(event.key.code >= Keyboard::Num1 && event.key.code <= Keyboard::Num9) {
+                            setRules(&RULES[min((size_t)(event.key.code - Keyboard::Num1), RULES.size())]);
                             break;
                         }
 
-                        case Keyboard::R:
-                            fillRandom();
-                            break;
+                        return false;
+                }
 
-                        case Keyboard::C:
-                            clear();
-                            break;
+                break;
 
-                        case Keyboard::Space:
-                            setPause(!paused);
+            case Event::MouseButtonPressed:
+                if(event.mouseButton.button == Mouse::Left || event.mouseButton.button == Mouse::Right) {
+                    userDrawingPos.x = event.mouseButton.x;
+                    userDrawingPos.y = event.mouseButton.y;
+                    userErasing = event.mouseButton.button == Mouse::Right;
 
-                            if(!paused) { // reset time point
-                                timePoint = system_clock::now();
-                            }
+                    int x = event.mouseButton.x / CELL_SIZE,
+                        y = event.mouseButton.y / CELL_SIZE;
 
-                            break;
-
-                        case Keyboard::Z:
-                            setCheckZone(checkZone == &CheckZone::QUAD ? &CheckZone::RHOMB : &CheckZone::QUAD);
-                            break;
-
-                        case Keyboard::Dash:
-                            setDelay(delay * 2);
-                            break;
-
-                        case Keyboard::Equal:
-                            setDelay(delay / 2);
-                            break;
-
-                        default:
-
-                            if(event.key.code >= Keyboard::Num1 && event.key.code <= Keyboard::Num9) {
-                                setRules(&RULES[min((size_t)(event.key.code - Keyboard::Num1), RULES.size())]);
-                            }
-
-                            break;
+                    if(x >= 0 && x < width && y >= 0 && y < height) {
+                        data[x][y] = userErasing ? CELL_OFF : CELL_ON;
                     }
 
                     break;
+                }
 
-                case Event::MouseButtonPressed:
-                    if(event.mouseButton.button == Mouse::Left || event.mouseButton.button == Mouse::Right) {
-                        userDrawingPos.x = event.mouseButton.x;
-                        userDrawingPos.y = event.mouseButton.y;
-                        userErasing = event.mouseButton.button == Mouse::Right;
-                    }
+                return false;
 
-                    break;
+            case Event::MouseButtonReleased:
+                if(event.mouseButton.button == Mouse::Left || event.mouseButton.button == Mouse::Right) {
+                    userDrawingPos.x = userDrawingPos.y = -1;
+                    userErasing = false;
+                }
 
-                case Event::MouseButtonReleased:
-                    if(event.mouseButton.button == Mouse::Left) {
-                        userDrawingPos.x = userDrawingPos.y = -1;
-                        userErasing = false;
-                    }
+                return false;
 
-                    break;
+            case Event::MouseMoved:
+                if(userDrawingPos.x >= 0 && userDrawingPos.y >= 0) {
 
-                case Event::MouseMoved:
-                    if(userDrawingPos.x >= 0 && userDrawingPos.y >= 0) {
+                    forEachCell(
+                            min(userDrawingPos.x, event.mouseMove.x) / CELL_SIZE,     min(userDrawingPos.y, event.mouseMove.y) / CELL_SIZE,
+                            max(userDrawingPos.x, event.mouseMove.x) / CELL_SIZE + 1, max(userDrawingPos.y, event.mouseMove.y) / CELL_SIZE + 1,
+                            [this, &event] (int x, int y, Cell& cell) {
+                                if(x >= 0 && x < width && y >= 0 && y < height &&
+                                        cell.intersectsWith(userDrawingPos, Vector2i(event.mouseMove.x, event.mouseMove.y), x, y)) {
 
-                        forEachCell(
-                                min(userDrawingPos.x, event.mouseMove.x) / CELL_SIZE,     min(userDrawingPos.y, event.mouseMove.y) / CELL_SIZE,
-                                max(userDrawingPos.x, event.mouseMove.x) / CELL_SIZE + 1, max(userDrawingPos.y, event.mouseMove.y) / CELL_SIZE + 1,
-                                [this, &event] (int x, int y, Cell& cell) {
-                                    if(x >= 0 && x < width && y >= 0 && y < height &&
-                                            cell.intersectsWith(userDrawingPos, Vector2i(event.mouseMove.x, event.mouseMove.y), x, y)) {
-
-                                        cell = userErasing ? CELL_OFF : CELL_ON;
-                                    }
+                                    cell = userErasing ? CELL_OFF : CELL_ON;
+                                    cell.draw(window, x, y);
                                 }
-                        );
+                            }
+                    );
 
-                        userDrawingPos.x = event.mouseMove.x;
-                        userDrawingPos.y = event.mouseMove.y;
-                    }
-
-                    break;
-
-                case Event::MouseWheelScrolled:
-                    if(event.mouseWheelScroll.wheel == Mouse::VerticalWheel) {
-                        incDelay(-event.mouseWheelScroll.delta);
-                    }
+                    userDrawingPos.x = event.mouseMove.x;
+                    userDrawingPos.y = event.mouseMove.y;
 
                     break;
-            }
+                }
 
+                return false;
+
+            case Event::MouseWheelScrolled:
+                if(event.mouseWheelScroll.wheel == Mouse::VerticalWheel) {
+                    incScale(event.mouseWheelScroll.delta);
+                    break;
+                }
+
+                return false;
+
+            default:
+                return false;
+        }
+
+        return true;
+    }
+
+    bool LifeGame::processEvents() {
+        Event event;
+
+        bool eventProcessed = false, needRedraw = false;
+
+        while(window.pollEvent(event)) {
+
+            needRedraw |= processEvent(event);
             eventProcessed = true;
         }
 
-        if(eventProcessed)
+        if(needRedraw)
             drawAll();
 
         return eventProcessed;
@@ -274,12 +484,38 @@ namespace lifegame {
     }
 
     void LifeGame::iteration() {
+         #ifdef DEBUG
+        static uint64_t tolalTicks = 0;
+        static uint32_t tolalSteps = 0;
+        #endif // DEBUG
+
         if(paused) {
             this_thread::sleep_for(MAX_SLEEP_TIME);
-            processEvent();
+            processEvents();
+
+             #ifdef DEBUG
+            if(tolalTicks != 0) {
+                uint64_t elapsed = tolalTicks / tolalSteps;
+                cout << "average: " << elapsed << " (" << elapsed / (1024.f * 1024.f) << " M)" << endl;
+                tolalTicks = 0;
+                tolalSteps = 0;
+            }
+            #endif // DEBUG
 
         } else {
+            #ifdef DEBUG
+            {
+                uint64_t start = rdtsc();
+                step();
+                uint64_t elapsed = rdtsc() - start;
+                //cout << "elapsed: " << elapsed << " (" << elapsed / (1024.f * 1024.f) << " M)" << endl;
+                tolalTicks += elapsed;
+                ++tolalSteps;
+            }
+            #else
             step();
+            #endif // DEBUG
+
             const auto nextTimePoint = this->timePoint += delay;
 
             while(true) {
@@ -289,7 +525,7 @@ namespace lifegame {
 
                 this_thread::sleep_for(remainedFew ? remainingTime : MAX_SLEEP_TIME);
 
-                if(processEvent() && paused)
+                if(processEvents() && paused)
                     return;
 
                 if(remainedFew)
@@ -301,18 +537,46 @@ namespace lifegame {
     void LifeGame::drawAll() {
         window.clear();
 
+        #ifdef DRAW_PARALLEL
+        mutex mtx;
+
+        forEachCellParallel(
+                [this, &mtx] (int x, int y, Cell& cell) {
+                    if(cell.isOn())
+                        Cell::drawCellSynchronized(window, x, y, mtx);
+                },
+
+                [this] (int x, int y, Cell& cell) {
+                    if(cell.isOn())
+                        Cell::drawCell(window, x, y);
+                }
+        );
+        #else
         forEachCell([this] (int x, int y, Cell& cell) {
-            cell.draw(window, x, y);
+            if(cell.isOn())
+                Cell::drawCell(window, x, y);
         });
+        #endif // DRAW_PARALLEL
 
-        for(Text* text : texts)
+        for(Text* text : texts) {
             window.draw(*text);
+        }
 
+        if(!helpElement.isHidden())
+            window.draw(helpElement);
+
+        #ifdef TRY_OPTIMIZE_RENDER
+        // Из-за двойной буферизации OpenGL приходится вызывать window.display()
+        // два раза, иначе отрисовывается предыдущий кадр
         window.display();
+        window.display();
+        #else
+        window.display();
+        #endif // TRY_OPTIMIZE_RENDER
     }
 
     void LifeGame::step() {
-        clearBorder();
+        //clearBorder();
 
         Cell* const* rowPtr = data;
 
@@ -334,13 +598,17 @@ namespace lifegame {
         forEachCell([this] (int x, int y, Cell& cell) {
             if(cell.willChange()) {
                 cell.change();
-                //cell.draw(window, x, y);
+                #ifdef TRY_OPTIMIZE_RENDER
+                cell.draw(window, x, y);
+                #endif // TRY_OPTIMIZE_RENDER
             }
         });
 
+        #ifdef TRY_OPTIMIZE_RENDER
+        window.display();
+        #else
         drawAll();
-
-        //window.display();
+        #endif // TRY_OPTIMIZE_RENDER
     }
 }
 

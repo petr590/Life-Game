@@ -22,6 +22,7 @@
 					<Add library="sfml-graphics" />
 					<Add library="sfml-window" />
 					<Add library="sfml-system" />
+					<Add library="pthread" />
 					<Add directory="/usr/lib/x86_64-linux-gnu" />
 				</Linker>
 			</Target>
@@ -40,6 +41,7 @@
 					<Add library="sfml-graphics" />
 					<Add library="sfml-window" />
 					<Add library="sfml-system" />
+					<Add library="pthread" />
 					<Add directory="/usr/lib/x86_64-linux-gnu" />
 				</Linker>
 			</Target>

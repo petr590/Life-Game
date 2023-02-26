@@ -10,31 +10,42 @@ int main(int argc, const char* args[]) {
 
     srand(time(nullptr));
 
-    /*
-    int** array = new_2d_array<int>(12, 12, 1, 999);
-
-    for(int x = -1; x < 11; ++x) {
-        for(int y = -1; y < 11; ++y) {
-            std::cout << array[x][y] << ' ';
-        }
-
-        std::cout << std::endl;
-    }
-
-    getchar();
-    //*/
-
-    //*
     try {
         LifeGame game(VideoMode::getFullscreenModes()[0]);
+
+        #if 1
         game.fillRandom();
         game.run();
+        #else
+
+        game.incScale(-2);
+        game.fillRandom();
+        game.setDelay(16ms);
+
+        uint64_t tolalTicks = 0;
+        uint32_t tolalSteps = 0;
+
+        for(int i = 0; i < 100; ++i) {
+            uint64_t start = rdtsc();
+
+            game.step();
+
+            uint64_t elapsed = rdtsc() - start;
+            //cout << "elapsed: " << elapsed << " (" << elapsed / (1024.f * 1024.f) << " M)" << endl;
+            tolalTicks += elapsed;
+            ++tolalSteps;
+        }
+
+        uint64_t average = tolalTicks / tolalSteps;
+        cout << "average: " << average << " (" << average / (1024.f * 1024.f) << " M)" << endl;
+        getchar();
+
+        #endif // 0
 
     } catch(exception& ex) {
         cerr << ex.what() << endl;
         return 1;
     }
-    //*/
 
     return 0;
 }

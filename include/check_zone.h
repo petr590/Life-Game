@@ -7,10 +7,12 @@
 namespace lifegame {
 
     using std::string;
+    using std::vector;
 
     class CheckZone {
         public:
-            static const CheckZone &QUAD, &RHOMB;
+            static const CheckZone &QUAD, &RHOMB, &CROSS;
+            static const vector<const CheckZone*> checkZones;
 
             const string name;
 
@@ -32,6 +34,13 @@ namespace lifegame {
     class RhombCheckZone: public CheckZone {
         public:
             RhombCheckZone(): CheckZone("rhomb") {}
+
+            virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const override;
+    };
+
+    class CrossCheckZone: public CheckZone {
+        public:
+            CrossCheckZone(): CheckZone("cross") {}
 
             virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const override;
     };

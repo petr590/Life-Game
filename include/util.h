@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <string>
+#include <sstream>
 #include <iostream>
 #include <SFML/Graphics.hpp>
 #include "font_load_exception.h"
@@ -13,6 +14,7 @@ namespace lifegame {
     using std::cerr;
     using std::endl;
     using std::string;
+    using std::stringstream;
     using std::size_t;
     using namespace sf;
 
@@ -44,6 +46,16 @@ namespace lifegame {
     }
 
     Font loadFont(string name);
+
+    string fp_to_string(float num);
+
+    #ifdef DEBUG
+    static uint64_t rdtsc() {
+        unsigned int low, high;
+        asm volatile ("rdtsc" : "=a" (low), "=d" (high));
+        return ((uint64_t)high << 32) | low;
+    }
+    #endif // DEBUG
 }
 
 #endif // LIFEGAME_UTIL_H

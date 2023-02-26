@@ -15,6 +15,12 @@ namespace lifegame {
 
         return font;
     }
+
+    string fp_to_string(float num) {
+        stringstream ss;
+        ss << num;
+        return ss.str();
+    }
 }
 
 #endif // LIFEGAME_UTIL_CPP
