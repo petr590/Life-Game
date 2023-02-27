@@ -1,7 +1,546 @@
+#ifndef LIFEGAME_CELL_H
+#define LIFEGAME_CELL_H
+
+#include <SFML/Graphics.hpp>
+
+#ifdef DRAW_PARALLEL
+#include <mutex>
+#endif // DRAW_PARALLEL
+
+namespace lifegame {
+
+    using namespace sf;
+
+    #ifdef DRAW_PARALLEL
+    using std::mutex;
+    #endif // DRAW_PARALLEL
+
+	static const char
+			CELL_ON = 0x1,
+			CELL_OFF = 0x0,
+			CELL_WILL_CHANGE = 0x2;
+
+    static const int
+            MIN_CELL_SIZE = 4,
+            MAX_CELL_SIZE = 64,
+            DEFAULT_CELL_SIZE = 16;
+
+    extern int CELL_SIZE;
+
+    struct Cell {
+        public:
+            static RectangleShape whiteCellShape, blackCellShape; // Для однопоточной отрисовки
+
+            static RectangleShape createCellShape(Color);
+
+            char value;
+
+            inline Cell() {}
+
+            inline Cell(char value):
+                value(value) {}
+
+            inline bool isOn() const {
+                return value & CELL_ON;
+            }
+
+            inline void on() {
+                value = CELL_ON;
+            }
+
+            inline void off() {
+                value = CELL_OFF;
+            }
+
+            inline void setWillChange() {
+                value |= CELL_WILL_CHANGE;
+            }
+
+            inline bool willChange() const {
+                return (value & CELL_WILL_CHANGE) != 0;
+            }
+
+            inline void change() {
+                value = (value ^ CELL_ON) & CELL_ON;
+            }
+
+            void draw(RenderWindow&, int x, int y) const;
+
+            static void drawCell(RenderWindow&, int x, int y);
+
+            #ifdef DRAW_PARALLEL
+            static void drawCellSynchronized(RenderWindow&, int x, int y, mutex& mtx);
+            #endif // DRAW_PARALLEL
+
+            bool intersectsWith(Vector2i startPoint, Vector2i endPoint, int x, int y) const;
+
+        protected:
+            static int sign(Vector2i startPoint, Vector2i endPoint, int x, int y);
+    };
+}
+
+#endif // CELL_H_INCLUDED
+#ifndef LIFEGAME_CHECK_ZONE_H
+#define LIFEGAME_CHECK_ZONE_H
+
+#include <string>
+
+namespace lifegame {
+
+    using std::string;
+    using std::vector;
+
+    class CheckZone {
+        public:
+            static const CheckZone &QUAD, &RHOMB, &CROSS;
+            static const vector<const CheckZone*> checkZones;
+
+            const string name;
+
+            CheckZone(string name):
+                    name(name) {}
+
+            virtual ~CheckZone() {}
+
+            virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const = 0;
+    };
+
+    class QuadCheckZone: public CheckZone {
+        public:
+            QuadCheckZone(): CheckZone("quad") {}
+
+            virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const override;
+    };
+
+    class RhombCheckZone: public CheckZone {
+        public:
+            RhombCheckZone(): CheckZone("rhomb") {}
+
+            virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const override;
+    };
+
+    class CrossCheckZone: public CheckZone {
+        public:
+            CrossCheckZone(): CheckZone("cross") {}
+
+            virtual int countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const override;
+    };
+}
+
+#endif // LIFEGAME_CHECK_ZONE_H
+#ifndef LIFEGAME_FONT_LOAD_EXCEPTION_H
+#define LIFEGAME_FONT_LOAD_EXCEPTION_H
+
+#include <stdexcept>
+
+namespace lifegame {
+
+    using std::runtime_error;
+    using std::string;
+
+    class FontLoadException: public runtime_error {
+        public:
+            FontLoadException(const string& what);
+            FontLoadException(const char* what);
+    };
+}
+
+#endif // LIFEGAME_FONT_LOAD_EXCEPTION_H
+#ifndef LIFE_GAME_H
+#define LIFE_GAME_H
+
+#include <vector>
+#include <functional>
+#include <chrono>
+#include <thread>
+
+#ifdef DRAW_PARALLEL
+#include <mutex>
+#endif // DRAW_PARALLEL
+
+#include <future>
+#include <iostream>
+#include <cmath>
+
+namespace lifegame {
+
+    using std::cout;
+    using std::cerr;
+    using std::endl;
+    using std::min;
+    using std::max;
+    using std::pow;
+    using std::vector;
+    using std::function;
+    using std::to_string;
+    using std::initializer_list;
+
+    using clock = std::chrono::steady_clock;
+    using duration   = clock::duration;
+    using time_point = clock::time_point;
+
+    using std::chrono::operator"" ms;
+
+    namespace this_thread = std::this_thread;
+
+    #ifdef DRAW_PARALLEL
+    using std::thread;
+    using std::mutex;
+    using std::future;
+    using std::async;
+    using std::launch;
+    #endif // DRAW_PARALLEL
+
+    static const char* const TITLE = "Life Game";
+
+    class LifeGame {
+            static const duration MAX_SLEEP_TIME, MIN_DELAY, MAX_DELAY, MIN_RENDER_DELAY;
+            static const vector<Rules> RULES;
+
+            static const int
+                    TOOLBAR_HEIGHT = 32,
+                    CHAR_WIDTH = 16,
+                    TOOLBAR_TEXT_OFFSET = 32 - CHAR_WIDTH / 2;
+
+            int dataWidth, dataHeight;
+            int width, height;
+            Cell* const* data;
+
+            RenderWindow window;
+            bool fullscreen;
+
+            bool paused;
+
+            bool userErasing = false;
+            Vector2i userDrawingPos{-1, -1};
+
+            const Rules* rules;
+            const CheckZone* checkZone;
+            unsigned int checkZoneIndex = 0;
+
+            time_point
+                    timePoint = clock::now(),
+                    renderTimePoint = timePoint;
+
+            duration delay;
+
+            Font defaultTextFont;
+            int textXOffset = CHAR_WIDTH;
+            Text pausedText, rulesText, checkZoneText, speedText, scaleText;
+            vector<Text*> texts = { &pausedText, &rulesText, &checkZoneText, &speedText, &scaleText };
+
+
+            class HelpElement: public Drawable {
+                private:
+                    bool hidden = true;
+                    RectangleShape frame;
+                    vector<Text> texts;
+
+                public:
+                    HelpElement(Vector2f windowSize, Vector2f size, initializer_list<Text> texts);
+
+                    void hide();
+
+                    void toggleHidden();
+
+                    bool isHidden() const;
+
+                protected:
+                    virtual void draw(RenderTarget&, RenderStates) const override;
+
+            } helpElement;
+
+
+            Text defaultText(int x, int y, string content = "");
+            Text defaultText(int charsWidth);
+
+            int widthOf(int width);
+            int heightOf(int width);
+
+        public:
+            void setPause(bool paused);
+            void setRules(const Rules*);
+            void setCheckZone(const CheckZone*);
+            void setDelay(duration delay);
+            void setScale(int scale);
+
+            void incScale(int extent);
+
+            LifeGame(VideoMode, bool fullscreen = false, string defaultFontName = "sans-serif.ttf");
+            ~LifeGame();
+
+        protected:
+            void extendDataIfNecessary();
+
+            void forEachCell(function<void(int, int, Cell&)>);
+
+            void forEachCell(int x, int y, int endX, int endY, function<void(int, int, Cell&)>);
+
+            #ifdef DRAW_PARALLEL
+            void forEachCellParallel(function<void(int, int, Cell&)> parallelFunc, function<void(int, int, Cell&)> func);
+            #endif // DRAW_PARALLEL
+
+            void clearBorder();
+
+        public:
+            void fillRandom();
+
+            void clear();
+
+            void fill();
+
+        protected:
+            bool processEvent(Event&);
+
+        public:
+            bool processEvents();
+
+            void run();
+
+        protected:
+            void iteration();
+
+            void drawAll();
+
+        public:
+            void step();
+    };
+}
+
+#endif // LIFE_GAME_H
+#ifndef LIFEGAME_RULE_H
+#define LIFEGAME_RULE_H
+
+#include <type_traits>
+
+namespace lifegame {
+
+    typedef int rule_t;
+
+    static const int MAX_RULE_NUMS = 8;
+
+    struct Rule {
+
+        const rule_t value;
+
+        constexpr Rule(rule_t value):
+            value(value) {}
+
+        bool matches(int neighbors) const;
+    };
+
+
+	template<typename V, typename... W>
+	static constexpr rule_t makeRule(V v, W... ws) {
+		static_assert(std::is_same<V, rule_t>(), "Only rule_t allowed");
+
+		if constexpr(sizeof...(W) == 0) {
+			return 1 << v;
+		} else {
+			return 1 << v | makeRule(ws...);
+		}
+	}
+}
+
+#endif // LIFEGAME_RULE_H
+#ifndef LIFEGAME_RULES_H
+#define LIFEGAME_RULES_H
+
+#include <type_traits>
+#include <string>
+
+namespace lifegame {
+
+    using std::string;
+
+    class Rules {
+        public:
+        const Rule birth, survive;
+        const string name;
+
+        private:
+        static void writeName(string& name, Rule);
+        static string nameFor(Rule birth, Rule survive);
+
+        public:
+        Rules(Rule birth, Rule survive);
+
+        bool matches(Cell, int neighbours) const;
+    };
+}
+
+#endif // LIFEGAME_RULES_H
+#ifndef LIFEGAME_UTIL_H
+#define LIFEGAME_UTIL_H
+
+#include <cstddef>
+#include <string>
+#include <sstream>
+#include <iostream>
+#include <SFML/Graphics.hpp>
+
+namespace lifegame {
+
+    using std::cout;
+    using std::cerr;
+    using std::endl;
+    using std::string;
+    using std::stringstream;
+    using std::size_t;
+    using namespace sf;
+
+    /**
+     * Выделяет двумерный массив указанных размеров одним блоком
+     * Для удаления нужно просто вызвать delete[] array;
+     */
+    template<typename T>
+    static T** new_2d_array(size_t width, size_t height, size_t offset = 0) {
+        T** array = static_cast<T**>(static_cast<void*>(new char[width * sizeof(T*) + width * height * sizeof(T)]));
+
+        T* const data = static_cast<T*>(static_cast<void*>(array + width));
+        for(size_t i = 0; i < width; ++i) {
+            array[i] = data + i * height + offset;
+        }
+
+        return array + offset;
+    }
+
+    template<typename T>
+    static T** new_2d_array(size_t width, size_t height, size_t offset, T fillValue) {
+        T** array = new_2d_array<T>(width, height, offset);
+
+        for(T *data = static_cast<T*>(static_cast<void*>(array - offset + width)), *end = data + width * height; data < end; ++data) {
+            *data = fillValue;
+        }
+
+        return array;
+    }
+
+    Font loadFont(string name);
+
+    string fp_to_string(float num);
+
+    #ifdef DEBUG
+    static uint64_t rdtsc() {
+        unsigned int low, high;
+        asm volatile ("rdtsc" : "=a" (low), "=d" (high));
+        return ((uint64_t)high << 32) | low;
+    }
+    #endif // DEBUG
+}
+
+#endif // LIFEGAME_UTIL_H
+#ifndef LIFEGAME_CELL_CPP
+#define LIFEGAME_CELL_CPP
+
+
+namespace lifegame {
+
+    int CELL_SIZE = DEFAULT_CELL_SIZE;
+
+    RectangleShape
+            Cell::whiteCellShape = Cell::createCellShape(Color::White),
+            Cell::blackCellShape = Cell::createCellShape(Color::Black);
+
+    RectangleShape Cell::createCellShape(Color color) {
+        RectangleShape cellShape(Vector2f(CELL_SIZE - 1, CELL_SIZE - 1));
+        cellShape.setFillColor(color);
+        return cellShape;
+    }
+
+
+    void Cell::draw(RenderWindow& window, int x, int y) const {
+        RectangleShape& cellShape = isOn() ? whiteCellShape : blackCellShape;
+        cellShape.setPosition(x * CELL_SIZE, y * CELL_SIZE);
+        window.draw(cellShape);
+    }
+
+    void Cell::drawCell(RenderWindow& window, int x, int y) {
+        whiteCellShape.setPosition(x * CELL_SIZE, y * CELL_SIZE);
+        window.draw(whiteCellShape);
+    }
+
+    #ifdef DRAW_PARALLEL
+    void Cell::drawCellSynchronized(RenderWindow& window, int x, int y, mutex& mtx) {
+
+        RectangleShape cellShape(Vector2f(CELL_SIZE - 1, CELL_SIZE - 1));
+
+        cellShape.setPosition(x * CELL_SIZE, y * CELL_SIZE);
+        cellShape.setFillColor(Color::White);
+
+        mtx.lock();
+        window.draw(cellShape);
+        mtx.unlock();
+    }
+    #endif // DRAW_PARALLEL
+
+    bool Cell::intersectsWith(Vector2i startPoint, Vector2i endPoint, int x, int y) const {
+        x *= CELL_SIZE;
+        y *= CELL_SIZE;
+
+        int sig1 = sign(startPoint, endPoint, x, y);
+
+        return sig1 != sign(startPoint, endPoint, x + CELL_SIZE, y) ||
+               sig1 != sign(startPoint, endPoint, x, y + CELL_SIZE) ||
+               sig1 != sign(startPoint, endPoint, x + CELL_SIZE, y + CELL_SIZE);
+    }
+
+    int Cell::sign(Vector2i startPoint, Vector2i endPoint, int x, int y) {
+        int value = (endPoint.y - startPoint.y) * (x - startPoint.x) - (endPoint.x - startPoint.x) * (y - startPoint.y);
+        return (value > 0) - (value < 0);
+    }
+}
+
+#endif
+#ifndef LIFEGAME_CHECK_ZONE_CPP
+#define LIFEGAME_CHECK_ZONE_CPP
+
+
+namespace lifegame {
+
+    int QuadCheckZone::countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const {
+        return prevRow[-1].isOn() + prevRow[0].isOn() + prevRow[1].isOn() +
+               currRow[-1].isOn() +                     currRow[1].isOn() +
+               nextRow[-1].isOn() + nextRow[0].isOn() + nextRow[1].isOn();
+    }
+
+    int RhombCheckZone::countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const {
+        return                      prevRow[0].isOn() +
+               currRow[-1].isOn() +                     currRow[1].isOn() +
+                                    nextRow[0].isOn();
+    }
+
+    int CrossCheckZone::countNeighbours(Cell* prevRow, Cell* currRow, Cell* nextRow) const {
+        return prevRow[-1].isOn() + prevRow[1].isOn() +
+               nextRow[-1].isOn() + nextRow[1].isOn();
+    }
+
+    const CheckZone
+            &CheckZone::QUAD = *new QuadCheckZone(),
+            &CheckZone::RHOMB = *new RhombCheckZone(),
+            &CheckZone::CROSS = *new CrossCheckZone();
+
+    const vector<const CheckZone*> CheckZone::checkZones { &CheckZone::QUAD, &CheckZone::RHOMB, &CheckZone::CROSS };
+}
+
+#endif // LIFEGAME_CHECK_ZONE_CPP
+#ifndef LIFEGAME_FONT_LOAD_EXCEPTION_CPP
+#define LIFEGAME_FONT_LOAD_EXCEPTION_CPP
+
+
+namespace lifegame {
+
+    FontLoadException::FontLoadException(const string& what):
+            runtime_error(what) {}
+
+    FontLoadException::FontLoadException(const char* what):
+            runtime_error(what) {}
+}
+
+#endif // LIFEGAME_FONT_LOAD_EXCEPTION_CPP
 #ifndef LIFE_GAME_CPP
 #define LIFE_GAME_CPP
 
-#include "life_game.h"
 
 namespace lifegame {
 
@@ -365,7 +904,7 @@ namespace lifegame {
                         setPause(!paused);
 
                         if(!paused) { // reset time point
-                            renderTimePoint = timePoint = clock::now();
+                            timePoint = clock::now();
                         }
 
                         break;
@@ -620,3 +1159,126 @@ namespace lifegame {
 }
 
 #endif // LIFE_GAME_CPP
+#ifndef LIFEGAME_RULE_CPP
+#define LIFEGAME_RULE_CPP
+
+
+namespace lifegame {
+
+    bool Rule::matches(int neighbors) const {
+        return (value & (1 << neighbors)) != 0;
+    }
+}
+
+#endif // LIFEGAME_RULE_CPP
+#ifndef LIFEGAME_RULES_CPP
+#define LIFEGAME_RULES_CPP
+
+
+namespace lifegame {
+
+    Rules::Rules(Rule birth, Rule survive):
+            birth(birth), survive(survive), name(nameFor(birth, survive)) {}
+
+
+    void Rules::writeName(string& name, Rule rule) {
+        for(int neighbors = 0; neighbors <= MAX_RULE_NUMS; ++neighbors) {
+            if(rule.matches(neighbors))
+                name += (char)('0' + neighbors);
+        }
+    }
+
+    string Rules::nameFor(Rule birth, Rule survive) {
+        string name;
+        name.reserve((MAX_RULE_NUMS + 1) * 2 + 5);
+
+        name += "B:";
+        writeName(name, birth);
+        name += " S:";
+        writeName(name, survive);
+
+        return name;
+    }
+
+    bool Rules::matches(Cell cell, int neighbours) const {
+        return cell.isOn() ? !survive.matches(neighbours) : birth.matches(neighbours);
+    }
+}
+
+#endif // LIFEGAME_RULES_CPP
+#ifndef LIFEGAME_UTIL_CPP
+#define LIFEGAME_UTIL_CPP
+
+
+namespace lifegame {
+
+    Font loadFont(string name) {
+        Font font;
+
+        if(!font.loadFromFile(name)) {
+            cerr << "Cannot loading font" << endl;
+            throw FontLoadException("Cannot load font \"" + name + "\"");
+        }
+
+        return font;
+    }
+
+    string fp_to_string(float num) {
+        stringstream ss;
+        ss << num;
+        return ss.str();
+    }
+}
+
+#endif // LIFEGAME_UTIL_CPP
+
+#include <iostream>
+
+int main(int argc, const char* args[]) {
+    using namespace lifegame;
+    using std::cout;
+    using std::cerr;
+    using std::endl;
+    using std::exception;
+
+    srand(time(nullptr));
+
+    try {
+        LifeGame game(VideoMode::getFullscreenModes()[0]);
+
+        #if 1
+        game.fillRandom();
+        game.run();
+        #else
+
+        game.incScale(-2);
+        game.fillRandom();
+        game.setDelay(16ms);
+
+        uint64_t tolalTicks = 0;
+        uint32_t tolalSteps = 0;
+
+        for(int i = 0; i < 100; ++i) {
+            uint64_t start = rdtsc();
+
+            game.step();
+
+            uint64_t elapsed = rdtsc() - start;
+            //cout << "elapsed: " << elapsed << " (" << elapsed / (1024.f * 1024.f) << " M)" << endl;
+            tolalTicks += elapsed;
+            ++tolalSteps;
+        }
+
+        uint64_t average = tolalTicks / tolalSteps;
+        cout << "average: " << average << " (" << average / (1024.f * 1024.f) << " M)" << endl;
+        getchar();
+
+        #endif // 0
+
+    } catch(exception& ex) {
+        cerr << ex.what() << endl;
+        return 1;
+    }
+
+    return 0;
+}

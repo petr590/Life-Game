@@ -1,2 +1,1 @@
-The rendering has been optimized, F1 help has been added, a new checkZone - cross has been added, i.e. only adjacent diagonal cells are checked
-Refactoring some functions
+The rendering frame rate is limited to 31.25 FPS

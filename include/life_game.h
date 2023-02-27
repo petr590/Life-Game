@@ -30,9 +30,11 @@ namespace lifegame {
     using std::function;
     using std::to_string;
     using std::initializer_list;
-    using std::chrono::system_clock;
-    using std::chrono::milliseconds;
-    using std::chrono::duration_cast;
+
+    using clock = std::chrono::steady_clock;
+    using duration   = clock::duration;
+    using time_point = clock::time_point;
+
     using std::chrono::operator"" ms;
 
     namespace this_thread = std::this_thread;
@@ -48,7 +50,7 @@ namespace lifegame {
     static const char* const TITLE = "Life Game";
 
     class LifeGame {
-            static const milliseconds MAX_SLEEP_TIME, MIN_DELAY, MAX_DELAY;
+            static const duration MAX_SLEEP_TIME, MIN_DELAY, MAX_DELAY, MIN_RENDER_DELAY;
             static const vector<Rules> RULES;
 
             static const int
@@ -72,8 +74,11 @@ namespace lifegame {
             const CheckZone* checkZone;
             unsigned int checkZoneIndex = 0;
 
-            system_clock::time_point timePoint = system_clock::now();
-            milliseconds delay;
+            time_point
+                    timePoint = clock::now(),
+                    renderTimePoint = timePoint;
+
+            duration delay;
 
             Font defaultTextFont;
             int textXOffset = CHAR_WIDTH;
@@ -112,7 +117,7 @@ namespace lifegame {
             void setPause(bool paused);
             void setRules(const Rules*);
             void setCheckZone(const CheckZone*);
-            void setDelay(milliseconds delay);
+            void setDelay(duration delay);
             void setScale(int scale);
 
             void incScale(int extent);

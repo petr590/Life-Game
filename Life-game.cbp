@@ -13,7 +13,10 @@
 				<Option compiler="gcc" />
 				<Option use_console_runner="0" />
 				<Compiler>
-					<Add option="-std=gnu++17" />
+					<Add option="-Weffc++" />
+					<Add option="-Wextra" />
+					<Add option="-Wall" />
+					<Add option="-std=c++17" />
 					<Add option="-g" />
 					<Add directory="include" />
 					<Add directory="/usr/include/SFML" />
@@ -32,12 +35,15 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
-					<Add option="-O2" />
+					<Add option="-fexpensive-optimizations" />
+					<Add option="-flto" />
+					<Add option="-O3" />
+					<Add option="-std=c++17" />
 					<Add directory="include" />
 					<Add directory="/usr/include/SFML" />
 				</Compiler>
 				<Linker>
-					<Add option="-s" />
+					<Add option="-flto" />
 					<Add library="sfml-graphics" />
 					<Add library="sfml-window" />
 					<Add library="sfml-system" />
@@ -47,6 +53,7 @@
 			</Target>
 		</Build>
 		<Compiler>
+			<Add option="-O3" />
 			<Add option="-Wall" />
 		</Compiler>
 		<Unit filename="include/cell.h" />

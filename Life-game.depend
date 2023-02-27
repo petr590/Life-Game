@@ -1,8 +1,8 @@
 # depslib dependency file v1.0
-1677434235 source:/home/winch/0x590/c++/Life-game/src/life_game.cpp
+1677499841 source:/home/winch/0x590/c++/Life-game/src/life_game.cpp
 	"life_game.h"
 
-1677431204 /home/winch/0x590/c++/Life-game/include/life_game.h
+1677500018 /home/winch/0x590/c++/Life-game/include/life_game.h
 	<vector>
 	<functional>
 	<chrono>
